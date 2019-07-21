@@ -1,0 +1,4 @@
+*.json
+db
+training_checkpoints
+config
