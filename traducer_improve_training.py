@@ -15,7 +15,7 @@ def main():
     path_to_file = "db/fra-eng/fra.txt"
     print(path_to_file)
     test = NmtWithAttention()
-    test.train(path_to_file,BATCH_SIZE=20, embedding_dim=256, units=1024, EPOCHS=0, num_examples=3000000)
+    test.improve_train(path_to_file, BATCH_SIZE=60, EPOCHS=4, num_examples=1000)
     test.save_training()
     # test.translate(u"j'aime les carottes")
 

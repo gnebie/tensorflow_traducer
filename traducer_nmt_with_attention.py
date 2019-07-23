@@ -244,7 +244,7 @@ class NmtWithAttention:
     def __init__(self):
         self.charge_values = False
 
-    def get_train_db(self, path_to_file, num_examples=30000, train_test_ration=0.2):
+    def get_train_db(self, path_to_file, num_examples, train_test_ration):
 
         input_tensor, target_tensor, inp_lang, targ_lang = load_dataset(path_to_file, num_examples)
 
@@ -283,6 +283,7 @@ class NmtWithAttention:
             print("no model create")
             return
         save_obj = {}
+        save_obj["path_to_file"] = self.path_to_file
         save_obj["BUFFER_SIZE"] = self.BUFFER_SIZE
         save_obj["BATCH_SIZE"] = self.BATCH_SIZE
         save_obj["steps_per_epoch"] = self.steps_per_epoch
@@ -303,12 +304,13 @@ class NmtWithAttention:
         print("saved on " + saving)
         return saving
 
-    def load_training(self, training_model_file):
+    def get_load_file(self, training_model_file):
         load_obj = {}
         saving = os.path.join("config", os.path.basename(training_model_file))
         with open(saving, 'r') as save_file:
             load_obj = json.load(save_file)
         # print(json.dumps(load_obj))
+        self.path_to_file = load_obj["path_to_file"]
         self.BUFFER_SIZE = load_obj["BUFFER_SIZE"]
         self.BATCH_SIZE = load_obj["BATCH_SIZE"]
         self.steps_per_epoch = load_obj["steps_per_epoch"]
@@ -321,26 +323,53 @@ class NmtWithAttention:
         self.inp_lang = tokenizer_from_json(load_obj["inp_lang"])
         self.targ_lang = tokenizer_from_json(load_obj["targ_lang"])
 
-
+    def load_elems(self, training_model_file):
         self.create_encoder_decoder()
-        self.create_checkpoint_obj('./training_checkpoints', train=False)
+        self.create_checkpoint_obj('./training_checkpoints', training_model_file, train=False)
         self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)).expect_partial()
         self.charge_values = True
 
+    def load_training(self, training_model_file):
+        self.get_load_file(training_model_file)
+        self.load_elems(training_model_file)
 
-    def train(self, path_to_file, BATCH_SIZE=64, embedding_dim=256, units=1024, EPOCHS=10):
+
+
+    def improve_train(self, training_model_file, BATCH_SIZE=None, EPOCHS=None, path_to_file=None, num_examples=None, train_test_ration=0.2):
+        self.get_load_file(training_model_file)
+        if BATCH_SIZE != None:
+            self.BATCH_SIZE = BATCH_SIZE
+        if EPOCHS != None:
+            self.EPOCHS = EPOCHS
+        if path_to_file != None:
+            self.path_to_file = path_to_file
+        path_to_file = self.path_to_file
+
+        input_tensor_train, target_tensor_train = self.get_train_db(path_to_file, num_examples, train_test_ration)
+        # TODO config file
+        self.create_dataset(input_tensor_train, target_tensor_train)
+
+        # besoin d'une fonction qui verifie les entreees du dataset par rapport a l'ancien
+        self.create_encoder_decoder()
+        self.create_checkpoint_obj('./training_checkpoints', training_model_file)
+        self.checkpoint.restore(tf.train.latest_checkpoint(self.checkpoint_dir)).expect_partial()
+        self.charge_values = True
+        self.traning_epochs(self.EPOCHS)
+
+
+    def train(self, path_to_file, BATCH_SIZE=64, embedding_dim=256, units=1024, EPOCHS=10, num_examples=30000, train_test_ration=0.2):
         self.path_to_file = path_to_file
         self.charge_values = True
         self.BATCH_SIZE = BATCH_SIZE
         self.embedding_dim = embedding_dim
         self.units = units
         self.EPOCHS = EPOCHS
-        input_tensor_train, target_tensor_train = self.get_train_db(path_to_file)
+        input_tensor_train, target_tensor_train = self.get_train_db(path_to_file, num_examples, train_test_ration)
 
         # TODO config file
         self.create_dataset(input_tensor_train, target_tensor_train)
         self.create_encoder_decoder()
-        self.create_checkpoint_obj('./training_checkpoints')
+        self.create_checkpoint_obj('./training_checkpoints', path_to_file)
 
         # self.steps_per_epoch = steps_per_epoch
         self.traning_epochs(self.EPOCHS)
@@ -357,13 +386,15 @@ class NmtWithAttention:
         self.encoder = Encoder(self.vocab_inp_size, self.embedding_dim, self.units, self.BATCH_SIZE)
         self.decoder = Decoder(self.vocab_tar_size, self.embedding_dim, self.units, self.BATCH_SIZE)
 
-    def create_checkpoint_obj(self, checkpoint_dir, train=True):
+    def create_checkpoint_obj(self, checkpoint_dir, file_dir=None, train=True):
         """
         create the checkpoint objects
         checkpoint_dir path of the checkpoint folder used
         need to build the encoder and the decoder before
         """
         self.checkpoint_dir = checkpoint_dir
+        if file_dir != None:
+            self.checkpoint_dir = os.path.join(checkpoint_dir, os.path.basename(file_dir).replace(".", "_"))
         self.checkpoint_prefix = os.path.join(self.checkpoint_dir, "ckpt")
         if train:
             self.optimizer = tf.keras.optimizers.Adam()
@@ -401,6 +432,7 @@ class NmtWithAttention:
           print('Epoch {} Loss {:.4f}'.format(epoch + 1,
                                               total_loss / self.steps_per_epoch))
           print('Time taken for 1 epoch {} sec\n'.format(time.time() - start))
+        self.checkpoint.save(file_prefix = self.checkpoint_prefix)
 
     @tf.function
     def train_step(self, inp, targ, enc_hidden):
